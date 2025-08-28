@@ -1,0 +1,21 @@
+networks:
+  stack-network:
+    name: docker-nt
+
+services:
+  f1-shipment-commander:
+    image: openjdk:21-jdk-bullseye # a imagem pode ser trocada sem problemas
+    container_name: f1-shipment-commander
+    hostname: f1-shipment-commander
+    volumes:
+      - ./target/f1-shipment-commander.jar:/app/app.jar
+    #entrypoint: java -jar /app/app.jar --spring.cloud.aws.secrets-manager.endpoint=http://localstack:4566
+    entrypoint: java -jar /app/app.jar
+    networks:
+      - stack-network
+    labels:
+      - traefik.docker.network=docker-nt
+      - traefik.http.routers.f1-shipment-commander.entryPoints=web
+      - traefik.http.routers.f1-shipment-commander.rule=Host(`localhost`)
+      - traefik.http.routers.f1-shipment-commander.service=f1-shipment-commander
+      - traefik.http.services..loadbalancer.server.port=8080

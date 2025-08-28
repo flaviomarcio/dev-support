@@ -1,0 +1,5 @@
+#!/bin/bash
+
+cd ./docker
+chmod +x ./run
+./run "$@"

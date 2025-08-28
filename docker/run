@@ -1,0 +1,113 @@
+#!/bin/bash
+
+. lib.sh
+. lib-postgres.sh
+
+function readArgs(){
+  unset arg_selector
+  unset arg_service
+  unset arg_components
+  unset arg_postgres_update
+  for arg in "$@"; do
+    if [[ ${arg} == "--selector" ]]; then
+      export arg_selector=1
+    elif [[ ${arg} == "--services" ]]; then
+      export arg_service=1
+    elif [[ ${arg} == "--components" ]]; then
+      export arg_components=1
+    elif [[ ${arg} == "--postgres-update" ]]; then
+      export arg_postgres_update=1
+    elif [[ ${arg} == "--print-info" ]]; then
+      export arg_print_info=1
+    fi
+  done
+}
+
+function selectorShow(){
+  local __last_error=
+  while : 
+  do
+    clear
+    if [[ ${__last_error} != "" ]]; then
+      echo ""
+      echo -e "${COLOR_RED}${__last_error}${COLOR_OFF}"
+    fi
+    echo ""
+    echo -e "${COLOR_MAGENTA}Deploy util${COLOR_OFF}"
+    echo ""
+    PS3=$'\n'"Selecione uma opção para instalação: "
+    local options=(Quit Services Components Postgres-Update Info )
+    select __opt in "${options[@]}"
+    do
+        case ${__opt} in
+            "Services")
+            ./run-services.sh
+            return 1
+                ;;
+            "Components")
+            ./run-components.sh
+            return 1
+                ;;
+            "Postgres-Update")
+            postgresDDLApply
+            return 1
+                ;;
+            "Info")
+            printMSG
+            return 1
+                ;;
+            "Quit")
+            exit 0
+                ;;
+            *) __last_error="invalid option ${__opt}" 
+            break
+        esac
+    done
+  done
+  return 1   
+}
+
+function main(){
+  readArgs "$@"   
+
+  if [[ "${arg_selector}" != "" ]]; then
+    selectorShow
+    return 0
+  fi
+
+  if [[ "${arg_components}" != "" ]]; then
+    ./run-components.sh
+    return 0
+  fi
+
+  if [[ "${arg_service}" != "" ]]; then
+    ./run-services.sh
+    return 0
+  fi
+
+  if [[ "${arg_postgres_update}" != "" ]]; then
+    postgresDDLApply
+    return 0
+  fi
+
+  if [[ "${arg_print_info}" != "" ]]; then
+    printMSG
+    return 0
+  fi
+
+  echo ""
+  echo -e "${COLOR_MAGENTA}Options${COLOR_OFF}"
+  echo -e "    ${COLOR_CIANO}- ${COLOR_BLUE}./run.sh ${COLOR_YELLOW}--selector        ${COLOR_GREEN}#Para exibir menu de opções${COLOR_OFF}"
+  echo -e "    ${COLOR_CIANO}- ${COLOR_BLUE}./run.sh ${COLOR_YELLOW}--services        ${COLOR_GREEN}#Para serviços necessários${COLOR_OFF}"
+  echo -e "    ${COLOR_CIANO}- ${COLOR_BLUE}./run.sh ${COLOR_YELLOW}--components      ${COLOR_GREEN}#Para deploy dos componentes do sistema${COLOR_OFF}"
+  echo -e "    ${COLOR_CIANO}- ${COLOR_BLUE}./run.sh ${COLOR_YELLOW}--postgres-update ${COLOR_GREEN}#Para atualização do postgres${COLOR_OFF}"
+  echo -e "    ${COLOR_CIANO}- ${COLOR_BLUE}./run.sh ${COLOR_YELLOW}--print-info      ${COLOR_GREEN}#Para exibir informações e comandos${COLOR_OFF}"
+  echo ""
+
+  sleep 2
+
+  selectorShow
+
+}
+
+main "$@"

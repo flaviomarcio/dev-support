@@ -1,0 +1,231 @@
+networks:
+  stack-network:
+    name: docker-nt
+
+volumes:
+  sqlserver_data:
+  db2_data:
+  postgres_data:
+  localstack_data:
+  kafka_data:
+
+services:
+  traefik:
+    image: traefik:v2.9
+    container_name: traefik
+    hostname: traefik
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command:
+      - --log.level=DEBUG
+      - --accesslog=true
+      - --accesslog.bufferingsize=100
+      - --accesslog.format=json
+
+      - --api
+      - --api.dashboard=true
+      - --api.insecure=true
+      - --providers.docker=true
+      #- --providers.docker.swarmMode=false
+      - --providers.docker.watch
+
+      - --entrypoints.web.address=:80
+      - --entrypoints.metrics.address=:8082
+      - --entrypoints.postgres.address=:5432
+      - --entrypoints.localstack.address=:4566
+      - --entrypoints.sqlserver.address=:1433
+      - --entrypoints.db2.address=:50000
+      - --entrypoints.kafka.address=:29092
+      
+    ports:
+      #web
+      - 80:80
+      #postgres
+      - 5432:5432
+      #sqlserver
+      - 1433:1433
+      #localstack
+      #- 4566:4566
+      #db2
+      - 50000:50000
+      #kafka
+      - 29092:29092
+    networks:
+      - stack-network
+    deploy:
+      mode: global
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1gb
+      restart_policy:
+        condition: on-failure
+
+  localstack:
+    image: localstack/localstack:latest
+    container_name: localstack
+    ports:
+      - 4566:4566
+      - 4571-4599:4571-4599
+    environment:
+      - DEBUG=1
+      - SERVICES=s3,sqs
+
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_CBOR_DISABLE=true
+
+      - USE_SSL=false
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - DATA_DIR=/var/lib/localstack/data
+
+    volumes:
+      - ./init-localstack.sh:/etc/localstack/init/init-localstack.sh
+      - /var/run/docker.sock:/var/run/docker.sock
+      - localstack_data:/var/lib/localstack
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - stack-network
+    labels:
+      - traefik.docker.network=docker-nt
+      - traefik.tcp.routers.localstack.rule=HostSNI(`*`)
+      - traefik.tcp.routers.localstack.entryPoints=localstack
+      - traefik.tcp.routers.localstack.service=localstack
+      - traefik.tcp.services.localstack.loadbalancer.server.port=4566
+  
+  localstack_resources:
+    image: amazon/aws-cli:latest
+    depends_on:
+      - localstack
+    container_name: localstack_resources
+    volumes:
+      - ./resources:/resources
+      - .:/docker
+    environment:
+      - AWS_HOST_NAME=${AWS_HOST_NAME:-localstack}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-east-1}
+      - AWS_HOST_URL=${AWS_HOST_URL:-http://localstack:4566}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-localstack}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-localstack}
+    entrypoint: [ "sh", "-c", "/resources/localstack/zrun.sh" ]
+    restart: unless-stopped
+    networks:
+      - stack-network
+
+  postgres:
+    image: postgres:latest
+    container_name: postgres
+    environment:
+      POSTGRES_USER: services
+      POSTGRES_PASSWORD: services
+      POSTGRES_DB: services
+    # ports:
+    #   - "5432:5432"
+    volumes:
+      # - postgres_data:/var/lib/postgresql/data
+      - ./initdb-postgres.sql:/docker-entrypoint-initdb.d/init.sql
+    restart: unless-stopped
+    networks:
+      - stack-network
+    labels:
+      - traefik.docker.network=docker-nt
+      - traefik.tcp.routers.postgres.rule=HostSNI(`*`)
+      - traefik.tcp.routers.postgres.entryPoints=postgres
+      - traefik.tcp.routers.postgres.service=postgres
+      - traefik.tcp.services.postgres.loadbalancer.server.port=5432
+      
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2019-latest
+    container_name: sqlserver
+    environment:
+      SA_PASSWORD: "Services123!"
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: "Developer"
+    # ports:
+    #   - "1433:1433"
+    networks:
+      - stack-network
+    labels:
+      - traefik.docker.network=docker-nt
+      - traefik.tcp.routers.localstack.rule=HostSNI(`*`)
+      - traefik.tcp.routers.localstack.entryPoints=sqlserver
+      - traefik.tcp.routers.localstack.service=localstack
+      - traefik.tcp.services.localstack.loadbalancer.server.port=1433
+  sqlserver_sqltools:
+    image: mcr.microsoft.com/mssql-tools
+    depends_on:
+      - sqlserver
+    container_name: sqlserver_sqltools
+    stdin_open: true
+    tty: true
+    environment:
+      MSSQL_SERVER: "sqlserver"
+      MSSQL_USER: "SA"
+      MSSQL_PASSWORD: "Services123!"
+    volumes:
+      - ./initdb-sqlserver.sql:/init-db.sql
+    entrypoint: ["/bin/bash", "-c", "sleep 10 && /opt/mssql-tools/bin/sqlcmd -S sqlserver -U SA -P 'Services123!' -i /init-db.sql && tail -f /dev/null"]
+    networks:
+      - stack-network
+
+  db2inst1:
+    image: ibmcom/db2
+    container_name: db2inst1
+    privileged: true
+    # ports:
+    #   - "50000:50000"   # porta padrão do DB2
+    environment:
+      LICENSE: accept
+      DB2INST1_PASSWORD: services
+      DBNAME: services
+    volumes:
+      - db2_data:/database
+    restart: unless-stopped
+    networks:
+      - stack-network
+    labels:
+      - traefik.docker.network=docker-nt
+      - traefik.tcp.routers.db2.rule=HostSNI(`*`)
+      - traefik.tcp.routers.db2.entryPoints=db2
+      - traefik.tcp.routers.db2.service=db2
+      - traefik.tcp.services.db2.loadbalancer.server.port=50000
+
+  kafka:
+    image: apache/kafka:latest
+    container_name: kafka
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      # KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      # KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      # KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      # KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_CLUSTER_ID: kafka-cluster #quando for para usar sem o zookeeper
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9092,EXTERNAL://0.0.0.0:9093,CONTROLLER://0.0.0.0:9094
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://localhost:9092,EXTERNAL://localhost:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9094
+
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    restart: unless-stopped
+    networks:
+      - stack-network
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=docker-nt
+      - traefik.tcp.routers.kafka.rule=HostSNI(`*`)
+      - traefik.tcp.routers.kafka.entryPoints=kafka
+      - traefik.tcp.routers.kafka.service=kafka
+      - traefik.tcp.services.kafka.loadbalancer.server.port=29092

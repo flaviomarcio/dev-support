@@ -1,0 +1,1 @@
+create index un_demo_table on v1_demo_app.demo_table using(id);

@@ -1,0 +1,21 @@
+networks:
+  stack-network:
+    name: docker-nt
+
+services:
+  ${DOCKER_COMPONENT}:
+    image: openjdk:21-jdk-bullseye # a imagem pode ser trocada sem problemas
+    container_name: ${DOCKER_COMPONENT}
+    hostname: ${DOCKER_COMPONENT}
+    volumes:
+      - ./target/${DOCKER_COMPONENT}.jar:/app/app.jar
+    #entrypoint: java -jar /app/app.jar --spring.cloud.aws.secrets-manager.endpoint=http://localstack:4566
+    entrypoint: java -jar /app/app.jar
+    networks:
+      - stack-network
+    labels:
+      - traefik.docker.network=docker-nt
+      - traefik.http.routers.${DOCKER_COMPONENT}.entryPoints=web
+      - traefik.http.routers.${DOCKER_COMPONENT}.rule=Host(`localhost`)
+      - traefik.http.routers.${DOCKER_COMPONENT}.service=${DOCKER_COMPONENT}
+      - traefik.http.services.${STACK_SERVICE}.loadbalancer.server.port=8080
