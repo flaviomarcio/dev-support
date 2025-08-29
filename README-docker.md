@@ -1,6 +1,6 @@
 # Configuração do Docker
 
-Neste documento existe informações de como configura o ambiente docker
+Neste documento existem informações de como configura o ambiente docker
 
 [Pagina principal](./README.md)
 
