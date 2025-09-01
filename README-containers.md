@@ -56,5 +56,5 @@ source ./lib-envs.sh
 docker compose up -d;
 
 #destroy os containers
-docker compose up -d;
+docker compose down;
 ```
